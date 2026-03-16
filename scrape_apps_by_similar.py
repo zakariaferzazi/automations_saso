@@ -8,11 +8,7 @@ Google Play Store App Scraper (Similar Apps Method)
 
 import random
 
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
+import requests
 from bs4 import BeautifulSoup
 import time
 import csv
@@ -20,6 +16,7 @@ import os
 import re
 from datetime import datetime
 from collections import deque, Counter
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
 app_links = [
 "https://play.google.com/store/apps/details?id=com.artmvstd.pregnancyChecker",
@@ -66,7 +63,7 @@ app_links = [
 # ===========================
 CONFIG = {
     # How many apps to extract data for (Fast process = smaller number, Long process = larger number)
-    'MAX_APPS_TO_SCRAPE': 3000, 
+    'MAX_APPS_TO_SCRAPE': 30, 
     
     # The starting app URL too find similar apps from
     'SEED_APP_URL': random.choice(app_links),
@@ -88,6 +85,13 @@ CONFIG = {
     'MAX_SIMILAR_APPS_PER_PAGE': 20,
     'DELAY_BETWEEN_REQUESTS': 1
 }
+
+PLAY_STORE_BASE_URL = 'https://play.google.com/store/apps/details'
+REQUEST_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Accept-Language': 'en-US,en;q=0.9',
+}
+REQUEST_TIMEOUT = 20
 
 # ===========================
 # Helper functions
@@ -131,71 +135,113 @@ def extract_keywords_from_description(description, num_keywords=5):
 # ===========================
 class SimilarAppsScraper:
     def __init__(self):
-        self.driver = None
+        self.session = requests.Session()
+        self.session.headers.update(REQUEST_HEADERS)
         self.visited_apps = set()
         self.apps_to_visit = deque()
         self.apps_saved_count = 0
-        
-    def initialize_driver(self):
-        """Initialize Chrome WebDriver in Headless Mode"""
-        chrome_options = Options()
-        # Headless mode allows it to run in the background or on GitHub Actions
-        chrome_options.add_argument("--headless=new")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--window-size=1920,1080")
-        
-        self.driver = webdriver.Chrome(options=chrome_options)
-        print("WebDriver initialized.")
+        self.page_cache = {}
+        self.fieldnames = [
+            'Niche', 'App Name', 'Logo URL', 'Install Count',
+            'Release Date', 'Rating', 'Review Count', 'App Link', 'Developer',
+            'Description', 'Keywords', 'Screenshot 1', 'Screenshot 2', 'Screenshot 3', 'Screenshot 4'
+        ]
+        self.all_apps = {}
+
+    def load_existing_csv(self):
+        """Load existing CSV rows so new data can be merged by App Link."""
+        csv_path = os.path.join(os.path.dirname(__file__), CONFIG['OUTPUT_CSV'])
+        try:
+            with open(csv_path, 'r', newline='', encoding='utf-8-sig') as csvfile:
+                reader = csv.DictReader(csvfile)
+                loaded_count = 0
+                for row in reader:
+                    app_link = self.normalize_app_url(row.get('App Link', '')) or row.get('App Link', '').strip()
+                    if not app_link:
+                        continue
+                    row['App Link'] = app_link
+                    self.all_apps[app_link] = row
+                    loaded_count += 1
+                print(f"Loaded {loaded_count} existing similar-app rows from {csv_path}")
+        except FileNotFoundError:
+            print(f"No existing similar-app CSV found at {csv_path}; starting fresh.")
     
     def extract_app_id_from_url(self, url):
         """Extract app package ID from Play Store URL"""
+        parsed = urlparse(url)
+        app_id = parse_qs(parsed.query).get('id', [None])[0]
+        if app_id:
+            return app_id
+
         match = re.search(r'id=([a-zA-Z0-9._]+)', url)
         return match.group(1) if match else None
+
+    def build_app_url(self, app_id):
+        """Build a canonical Play Store URL with fixed locale for consistent parsing."""
+        return f"{PLAY_STORE_BASE_URL}?{urlencode({'id': app_id, 'hl': 'en_US', 'gl': 'US'})}"
+
+    def normalize_app_url(self, url):
+        """Normalize app URLs so crawled links deduplicate correctly."""
+        app_id = self.extract_app_id_from_url(url)
+        return self.build_app_url(app_id) if app_id else None
+
+    def fetch_page(self, app_url):
+        """Fetch and cache a Play Store app page."""
+        normalized_url = self.normalize_app_url(app_url)
+        if not normalized_url:
+            return None, None, None
+
+        cached_html = self.page_cache.get(normalized_url)
+        if cached_html is None:
+            response = self.session.get(normalized_url, timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()
+            cached_html = response.text
+            self.page_cache[normalized_url] = cached_html
+
+        return normalized_url, cached_html, BeautifulSoup(cached_html, 'html.parser')
     
     def get_similar_apps(self, app_url):
         """Get similar apps from an app page (Phase 1)"""
-        similar_apps = []
         try:
-            self.driver.get(app_url)
-            time.sleep(0.5) 
-            
-            # Wait for basic body presence
-            try:
-                WebDriverWait(self.driver, 5).until(
-                    EC.presence_of_element_located((By.TAG_NAME, "body"))
-                )
-            except:
-                pass
-            
-            # Scroll to load similar apps 
-            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
-            time.sleep(0.5)
-            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(0.5)
-            
-            # Get all links matching an app detail URL
-            all_links = self.driver.find_elements(By.XPATH, "//a[contains(@href, '/store/apps/details?id=')]")
-            
-            for link in all_links[:CONFIG['MAX_SIMILAR_APPS_PER_PAGE']]:
-                try:
-                    href = link.get_attribute('href')
-                    if href and '/store/apps/details?id=' in href:
-                        # Clean URL
-                        if '&' in href:
-                            href = href.split('&')[0]
-                        full_url = href if href.startswith('http') else 'https://play.google.com' + href
-                        
-                        app_id = self.extract_app_id_from_url(full_url)
-                        if app_id and app_id not in self.visited_apps:
-                            similar_apps.append(full_url)
-                except:
-                    pass
-                    
+            current_url, page_source, soup = self.fetch_page(app_url)
+            if not page_source or not soup:
+                return []
+
+            current_app_id = self.extract_app_id_from_url(current_url)
+            candidate_urls = []
+
+            for link in soup.select('a[href*="/store/apps/details?id="]'):
+                href = link.get('href')
+                if not href:
+                    continue
+                candidate_urls.append(urljoin('https://play.google.com', href))
+
+            candidate_urls.extend(
+                urljoin('https://play.google.com', match)
+                for match in re.findall(r'(/store/apps/details\?id=[^"\'&]+)', page_source)
+            )
+
+            similar_apps = []
+            seen_ids = set()
+            for candidate_url in candidate_urls:
+                normalized_url = self.normalize_app_url(candidate_url)
+                if not normalized_url:
+                    continue
+
+                app_id = self.extract_app_id_from_url(normalized_url)
+                if not app_id or app_id == current_app_id or app_id in self.visited_apps or app_id in seen_ids:
+                    continue
+
+                seen_ids.add(app_id)
+                similar_apps.append(normalized_url)
+
+                if len(similar_apps) >= CONFIG['MAX_SIMILAR_APPS_PER_PAGE']:
+                    break
+
+            return similar_apps
         except Exception as e:
             print(f"Error collecting similar apps: {e}")
-            
-        return list(set(similar_apps))
+            return []
     
     # ---------------------------------------------------------
     # DATA EXTRACTION METHODS (From scrape_categories_to_csv)
@@ -246,19 +292,9 @@ class SimilarAppsScraper:
     def extract_app_details(self, app_url):
         """Extract detailed information from the app page (Phase 2)"""
         try:
-            self.driver.get(app_url)
-            
-            try:
-                WebDriverWait(self.driver, 5).until(
-                    EC.presence_of_element_located((By.TAG_NAME, "h1"))
-                )
-            except:
-                pass
-            
-            time.sleep(1) # Buffer to render JS elements
-            
-            page_source = self.driver.page_source
-            soup = BeautifulSoup(page_source, 'html.parser')
+            normalized_url, page_source, soup = self.fetch_page(app_url)
+            if not page_source or not soup:
+                return None
             
             # --- Extract App Name ---
             app_name = "N/A"
@@ -373,7 +409,7 @@ class SimilarAppsScraper:
                 'Release Date': release_date,
                 'Rating': rating,
                 'Review Count': review_count,
-                'App Link': app_url,
+                'App Link': normalized_url,
                 'Developer': developer,
                 'Description': description,
                 'Keywords': keywords,
@@ -388,33 +424,30 @@ class SimilarAppsScraper:
             return None
 
     def save_to_csv(self, app_data):
-        """Save app data to CSV file (append mode, no overwrites)"""
+        """Merge one app row into the in-memory dataset keyed by App Link."""
         if not app_data:
             return
-            
+
+        app_link = self.normalize_app_url(app_data.get('App Link', '')) or app_data.get('App Link', '').strip()
+        if not app_link:
+            return
+
+        app_data['App Link'] = app_link
+        self.all_apps[app_link] = app_data
+        self.apps_saved_count += 1
+        print(f"    ✓ MERGED: {app_data['App Name']} ({app_data['Install Count']} installs)")
+
+    def write_all_to_csv(self):
+        """Write one deduplicated CSV file from the merged app map."""
         csv_path = os.path.join(os.path.dirname(__file__), CONFIG['OUTPUT_CSV'])
-        headers = [
-            'Niche', 'App Name', 'Logo URL', 'Install Count', 
-            'Release Date', 'Rating', 'Review Count', 'App Link', 'Developer',
-            'Description', 'Keywords', 'Screenshot 1', 'Screenshot 2', 'Screenshot 3', 'Screenshot 4'
-        ]
-        
-        file_exists = os.path.exists(csv_path)
-        
-        try:
-            # Always append - never overwrite
-            with open(csv_path, 'a', newline='', encoding='utf-8-sig') as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=headers)
-                # Only write header if file is brand new
-                if not file_exists:
-                    writer.writeheader()
-                writer.writerow(app_data)
-            
-            self.apps_saved_count += 1
-            print(f"    ✓ SAVED: {app_data['App Name']} ({app_data['Install Count']} installs)")
-            
-        except Exception as e:
-            print(f"    ✗ Error saving to CSV: {e}")
+        apps_list = sorted(self.all_apps.values(), key=lambda app: app.get('App Name', '').lower())
+
+        with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=self.fieldnames)
+            writer.writeheader()
+            writer.writerows(apps_list)
+
+        print(f"Saved {len(apps_list)} deduplicated apps to: {csv_path}")
 
     def run(self):
         """Run the two-phase scraper"""
@@ -422,14 +455,14 @@ class SimilarAppsScraper:
         print("Google Play Store App Data Scraper (Similar Apps Method)")
         print(f"Max apps target: {CONFIG['MAX_APPS_TO_SCRAPE']}")
         print("="*60)
-        
-        self.initialize_driver()
+
+        self.load_existing_csv()
         self.apps_to_visit.append((CONFIG['SEED_APP_URL'], 0))
         collected_app_urls = set()
         
-        # DO NOT remove old CSV - we're appending data from both scripts
+        # Existing data is loaded first and rewritten as one deduplicated file at the end.
         csv_path = os.path.join(os.path.dirname(__file__), CONFIG['OUTPUT_CSV'])
-        print(f"Appending data to: {csv_path}")
+        print(f"Merging scraped data into: {csv_path}")
             
         try:
             # ==================================
@@ -447,12 +480,16 @@ class SimilarAppsScraper:
                     continue
                     
                 self.visited_apps.add(app_id)
-                collected_app_urls.add(current_url)
+                normalized_url = self.normalize_app_url(current_url)
+                if not normalized_url:
+                    continue
+
+                collected_app_urls.add(normalized_url)
                 
                 print(f"Found [{len(collected_app_urls)}/{CONFIG['MAX_APPS_TO_SCRAPE']}]: {app_id}")
                 
                 if depth < CONFIG['CRAWL_DEPTH'] and len(collected_app_urls) < CONFIG['MAX_APPS_TO_SCRAPE']:
-                    similar = self.get_similar_apps(current_url)
+                    similar = self.get_similar_apps(normalized_url)
                     for url in similar:
                         if self.extract_app_id_from_url(url) not in self.visited_apps:
                             self.apps_to_visit.append((url, depth + 1))
@@ -475,10 +512,13 @@ class SimilarAppsScraper:
                     self.save_to_csv(app_data)
                     
                 time.sleep(CONFIG['DELAY_BETWEEN_REQUESTS'])
+
+            self.write_all_to_csv()
                 
             print("\n" + "="*60)
             print("SCRAPING COMPLETE!")
-            print(f"Total apps successfully saved: {self.apps_saved_count}")
+            print(f"Total scraped apps merged this run: {self.apps_saved_count}")
+            print(f"Total unique apps in file: {len(self.all_apps)}")
             print(f"Data saved to: {csv_path}")
             print("="*60)
 
@@ -487,9 +527,8 @@ class SimilarAppsScraper:
         except Exception as e:
             print(f"\nCritical Error: {e}")
         finally:
-            if self.driver:
-                self.driver.quit()
-                print("WebDriver closed.")
+            self.session.close()
+            print("HTTP session closed.")
 
 if __name__ == "__main__":
     scraper = SimilarAppsScraper()

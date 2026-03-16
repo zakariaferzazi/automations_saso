@@ -16,7 +16,7 @@ CONFIG = {
     'FILTER_BY_RELEASE_DATE': True,
     
     # How many days back too include (only used if FILTER_BY_RELEASE_DATE = True)
-    # Example: 90 = last 90 days, 180 = last 6 months, 365 = last year
+    # Example: 90 = last 90 days, 180 = last 6 months, `365` = last year
     'DAYS_THRESHOLD': 365,
 }
 
@@ -24,23 +24,23 @@ CONFIG = {
 # App Store Categories (iTunes genre IDs — names match Play Store niches exactly)
 CATEGORIES = {
     "Games":               6014,
-    "Business":            6000,
-    "Education":           6017,
-    "Entertainment":       6016,
-    "Finance":             6015,
-    "Food & Drink":        6023,
-    "Health & Fitness":    6013,
-    "Lifestyle":           6010,
-    "Medical":             6020,
-    "Music":               6011,
-    "News":                6009,
-    "Photo & Video":       6008,
-    "Productivity":        6007,
-    "Shopping":            6024,
-    "Social Networking":   6005,
-    "Sports":              6004,
-    "Travel":              6003,
-    "Utilities":           6002,
+    # "Business":            6000,
+    # "Education":           6017,
+    # "Entertainment":       6016,
+    # "Finance":             6015,
+    # "Food & Drink":        6023,
+    # "Health & Fitness":    6013,
+    # "Lifestyle":           6010,
+    # "Medical":             6020,
+    # "Music":               6011,
+    # "News":                6009,
+    # "Photo & Video":       6008,
+    # "Productivity":        6007,
+    # "Shopping":            6024,
+    # "Social Networking":   6005,
+    # "Sports":              6004,
+    # "Travel":              6003,
+    # "Utilities":           6002,
 }
 
 # Countries to search (using correct iTunes store country codes)
@@ -119,7 +119,24 @@ class AppStoreSearcher:
         self.filter_by_date = CONFIG['FILTER_BY_RELEASE_DATE']
         self.days_threshold = days_threshold if days_threshold is not None else CONFIG['DAYS_THRESHOLD']
         self.cutoff_date = datetime.now() - timedelta(days=self.days_threshold)
-        self.all_apps = {}  # Use dict to avoid duplicates (key: app_id)
+        self.fieldnames = ['Niche', 'App Name', 'Logo URL', 'Install Count', 'Release Date', 'Rating', 'Review Count', 'App Link', 'Developer', 'Description', 'Keywords', 'Screenshot 1', 'Screenshot 2', 'Screenshot 3', 'Screenshot 4']
+        self.all_apps = {}  # Use dict to avoid duplicates (key: App Link)
+
+    def load_existing_csv(self, filename='app_store_apps.csv'):
+        """Load existing CSV rows so new data can be merged by App Link."""
+        try:
+            with open(filename, 'r', newline='', encoding='utf-8') as file:
+                reader = csv.DictReader(file)
+                loaded_count = 0
+                for row in reader:
+                    app_link = row.get('App Link', '').strip()
+                    if not app_link:
+                        continue
+                    self.all_apps[app_link] = row
+                    loaded_count += 1
+                print(f"Loaded {loaded_count} existing App Store rows from {filename}")
+        except FileNotFoundError:
+            print(f"No existing App Store CSV found at {filename}; starting fresh.")
     
     def estimate_install_count(self, review_count):
         """
@@ -350,6 +367,8 @@ class AppStoreSearcher:
             categories = list(CATEGORIES.keys())
         if countries is None:
             countries = COUNTRIES
+
+        self.load_existing_csv(output_file)
         
         # Collect all unique app IDs first
         print(f"\n{'='*70}")
@@ -381,16 +400,8 @@ class AppStoreSearcher:
         print(f"\n{'='*70}")
         print(f"PHASE 2: Fetching metadata for {len(app_id_to_category)} unique apps")
         print(f"Filtering for apps released within the last {self.days_threshold} days")
-        print(f"Saving results immediately to {output_file}")
+        print(f"Merging results into existing data from {output_file}")
         print(f"{'='*70}\n")
-        
-        # Define fields and write header (use keys from get_app_metadata to ensure consistency)
-        fieldnames = ['Niche', 'App Name', 'Logo URL', 'Install Count', 'Release Date', 'Rating', 'Review Count', 'App Link', 'Developer', 'Description', 'Keywords', 'Screenshot 1', 'Screenshot 2', 'Screenshot 3', 'Screenshot 4']
-        
-        # Initialize file with headers
-        with open(output_file, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
         
         # Fetch metadata for each unique app ID
         total = len(app_id_to_category)
@@ -401,20 +412,15 @@ class AppStoreSearcher:
             if metadata:
                 # Use the category we searched, not primaryGenreName, so niche names match Play Store
                 metadata['Niche'] = niche_name
-                self.all_apps[app_id] = metadata
-                # Save immediately to CSV
-                try:
-                    with open(output_file, 'a', newline='', encoding='utf-8') as f:
-                        writer = csv.DictWriter(f, fieldnames=fieldnames)
-                        writer.writerow(metadata)
-                except Exception as e:
-                    print(f"Error saving app {app_id} to CSV: {e}")
+                app_link = metadata.get('App Link', '').strip()
+                if app_link:
+                    self.all_apps[app_link] = metadata
             
             time.sleep(0.3)  # Rate limiting
         
         print(f"\n{'='*70}")
         print(f"✓ Found {len(self.all_apps)} apps released within the last {self.days_threshold} days")
-        print(f"✓ All items saved to {output_file}")
+        print(f"✓ Merged results ready to write to {output_file}")
         print(f"{'='*70}\n")
     
     def save_to_csv(self, filename='app_store_apps.csv'):
@@ -432,10 +438,8 @@ class AppStoreSearcher:
         # Sort by app name alphabetically
         apps_list.sort(key=lambda x: x['App Name'])
         
-        keys = apps_list[0].keys()
-        
         with open(filename, 'w', newline='', encoding='utf-8') as file:
-            dict_writer = csv.DictWriter(file, keys)
+            dict_writer = csv.DictWriter(file, self.fieldnames)
             dict_writer.writeheader()
             dict_writer.writerows(apps_list)
         

@@ -1,17 +1,14 @@
 # -*- coding: utf-8 -*-
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
-from bs4 import BeautifulSoup
-import time
 import csv
 import os
-from datetime import datetime
-from datetime import timedelta
-from collections import Counter
 import re
+import time
+from collections import Counter
+from datetime import datetime
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse
+
+import requests
+from bs4 import BeautifulSoup
 
 # ===========================
 # CONFIGURATION - EDIT HERE
@@ -23,38 +20,150 @@ CONFIG = {
     # How many months back too include (only used if FILTER_BY_RELEASE_DATE = True)
     # Example: 3 = last 3 months, 6 = last 6 months, 12 = last year
     'MONTHS_THRESHOLD': 12,
+
+    # Fixed locale for consistent scraping results
+    'LANGUAGE': 'en_US',
+    'COUNTRY': 'US',
+
+    # Delay between detail requests
+    'DELAY_BETWEEN_REQUESTS': 1,
 }
 
-# Set up Chrome WebDriver in headless mode for GitHub Actions
-chrome_options = Options()
-chrome_options.add_argument("--headless=new")
-chrome_options.add_argument("--no-sandbox")
-chrome_options.add_argument("--disable-dev-shm-usage")
-chrome_options.add_argument("--window-size=1920,1080")
-
-driver = webdriver.Chrome(options=chrome_options)
+PLAY_STORE_BASE_URL = 'https://play.google.com/store/apps/details'
+CATEGORY_BASE_URL = 'https://play.google.com/store/apps/category'
+REQUEST_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Accept-Language': 'en-US,en;q=0.9',
+}
+REQUEST_TIMEOUT = 20
+CSV_HEADERS = [
+    'Niche',
+    'App Name',
+    'Logo URL',
+    'Install Count',
+    'Release Date',
+    'Rating',
+    'Review Count',
+    'App Link',
+    'Developer',
+    'Description',
+    'Keywords',
+    'Screenshot 1',
+    'Screenshot 2',
+    'Screenshot 3',
+    'Screenshot 4'
+]
+INTERNAL_FIELDS = [
+    'niche', 'app_name', 'logo_url', 'install_count', 'release_date', 'rating', 'review_count',
+    'app_link', 'developer', 'description', 'keywords', 'screenshot_1', 'screenshot_2', 'screenshot_3', 'screenshot_4'
+]
 
 # Google Play Store Categories  (names match App Store niches exactly)
 CATEGORIES = {
     "Games":               "GAME",
-    "Business":            "BUSINESS",
-    "Education":           "EDUCATION",
-    "Entertainment":       "ENTERTAINMENT",
-    "Finance":             "FINANCE",
-    "Food & Drink":        "FOOD_AND_DRINK",
-    "Health & Fitness":    "HEALTH_AND_FITNESS",
-    "Lifestyle":           "LIFESTYLE",
-    "Medical":             "MEDICAL",
-    "Music":               "MUSIC_AND_AUDIO",
-    "News":                "NEWS_AND_MAGAZINES",
-    "Photo & Video":       "PHOTOGRAPHY",
-    "Productivity":        "PRODUCTIVITY",
-    "Shopping":            "SHOPPING",
-    "Social Networking":   "SOCIAL",
-    "Sports":              "SPORTS",
-    "Travel":              "TRAVEL_AND_LOCAL",
-    "Utilities":           "TOOLS",
+    # "Business":            "BUSINESS",
+    # "Education":           "EDUCATION",
+    # "Entertainment":       "ENTERTAINMENT",
+    # "Finance":             "FINANCE",
+    # "Food & Drink":        "FOOD_AND_DRINK",
+    # "Health & Fitness":    "HEALTH_AND_FITNESS",
+    # "Lifestyle":           "LIFESTYLE",
+    # "Medical":             "MEDICAL",
+    # "Music":               "MUSIC_AND_AUDIO",
+    # "News":                "NEWS_AND_MAGAZINES",
+    # "Photo & Video":       "PHOTOGRAPHY",
+    # "Productivity":        "PRODUCTIVITY",
+    # "Shopping":            "SHOPPING",
+    # "Social Networking":   "SOCIAL",
+    # "Sports":              "SPORTS",
+    # "Travel":              "TRAVEL_AND_LOCAL",
+    # "Utilities":           "TOOLS",
 }
+
+
+def create_session():
+    """Create a shared HTTP session for category and detail requests."""
+    session = requests.Session()
+    session.headers.update(REQUEST_HEADERS)
+    return session
+
+
+def extract_app_id_from_url(url):
+    """Extract app package ID from a Play Store URL."""
+    parsed = urlparse(url)
+    app_id = parse_qs(parsed.query).get('id', [None])[0]
+    if app_id:
+        return app_id
+
+    match = re.search(r'id=([a-zA-Z0-9._]+)', url)
+    return match.group(1) if match else None
+
+
+def build_app_url(app_id):
+    """Build a canonical Play Store app URL with fixed locale."""
+    return f"{PLAY_STORE_BASE_URL}?{urlencode({'id': app_id, 'hl': CONFIG['LANGUAGE'], 'gl': CONFIG['COUNTRY']})}"
+
+
+def normalize_app_url(url):
+    """Normalize app links so duplicates collapse cleanly."""
+    app_id = extract_app_id_from_url(url)
+    return build_app_url(app_id) if app_id else None
+
+
+def build_category_url(category_id):
+    """Build a category URL with fixed locale."""
+    return f"{CATEGORY_BASE_URL}/{category_id}?{urlencode({'hl': CONFIG['LANGUAGE'], 'gl': CONFIG['COUNTRY']})}"
+
+
+def fetch_page(session, url, page_cache):
+    """Fetch and cache a page to avoid repeat requests."""
+    cached_html = page_cache.get(url)
+    if cached_html is None:
+        response = session.get(url, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        cached_html = response.text
+        page_cache[url] = cached_html
+
+    return cached_html, BeautifulSoup(cached_html, 'html.parser')
+
+
+def csv_row_to_app(row):
+    """Convert CSV headers to the script's internal field names."""
+    app = {}
+    for header, field in zip(CSV_HEADERS, INTERNAL_FIELDS):
+        app[field] = row.get(header, row.get(field, ''))
+    return app
+
+
+def app_to_csv_row(app):
+    """Convert internal field names back to CSV headers."""
+    return {
+        header: app.get(field, '')
+        for header, field in zip(CSV_HEADERS, INTERNAL_FIELDS)
+    }
+
+
+def load_existing_csv(filename='google_play_apps.csv'):
+    """Load existing CSV rows and index them by app_link."""
+    csv_path = os.path.join(os.path.dirname(__file__), filename)
+    existing_apps = {}
+
+    try:
+        with open(csv_path, 'r', newline='', encoding='utf-8-sig') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                app = csv_row_to_app(row)
+                app_link = normalize_app_url(app.get('app_link', '')) or app.get('app_link', '').strip()
+                if not app_link:
+                    continue
+                app['app_link'] = app_link
+                existing_apps[app_link] = app
+        print(f"Loaded {len(existing_apps)} existing Google Play category rows from {csv_path}")
+    except FileNotFoundError:
+        print(f"No existing Google Play category CSV found at {csv_path}; starting fresh.")
+
+    return existing_apps
+
 def extract_keywords_from_description(description, num_keywords=5):
     """Extract most common keywords from description"""
     if not description or description == "N/A":
@@ -120,23 +229,14 @@ def extract_install_count(page_source):
         return install_text.strip()
     return "N/A"
 
-def extract_app_details(app_url, category_name):
-    """Extract detailed information from app page"""
+def extract_app_details(session, app_url, category_name, page_cache):
+    """Extract detailed information from app page."""
     try:
-        driver.get(app_url)
-        
-        # Wait for content to load, utilizing WebDriverWait to ensure H1 is present
-        try:
-            WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.TAG_NAME, "h1"))
-            )
-        except:
-            pass
-        
-        time.sleep(1) # Small buffer
-        
-        page_source = driver.page_source
-        soup = BeautifulSoup(page_source, 'html.parser')
+        normalized_url = normalize_app_url(app_url)
+        if not normalized_url:
+            return None
+
+        page_source, soup = fetch_page(session, normalized_url, page_cache)
         
         # --- Extract App Name ---
         app_name = "N/A"
@@ -232,7 +332,7 @@ def extract_app_details(app_url, category_name):
         keywords = extract_keywords_from_description(description)
         
         # Extract release date
-        release_date = extract_release_date(page_source, app_url)
+        release_date = extract_release_date(page_source, normalized_url)
         
         # --- Filter by release date (OPTIONAL) ---
         if CONFIG['FILTER_BY_RELEASE_DATE']:
@@ -264,7 +364,7 @@ def extract_app_details(app_url, category_name):
             'release_date': release_date,
             'rating': rating,
             'review_count': review_count,
-            'app_link': app_url,
+            'app_link': normalized_url,
             'developer': developer,
             'description': description,
             'keywords': keywords,
@@ -278,50 +378,38 @@ def extract_app_details(app_url, category_name):
         print(f"Error extracting details for {app_url}: {e}")
         return None
 
-def scrape_category(category_name, category_id, max_apps=100, csv_filename='google_play_apps.csv', is_first_category=False):
-    """Scrape apps from a specific category"""
+def scrape_category(session, page_cache, existing_apps, category_name, category_id, max_apps=100):
+    """Scrape apps from a specific category."""
     print(f"\n{'='*60}")
     print(f"Scraping category: {category_name}")
     print(f"{'='*60}")
     
     apps_saved_count = 0
     
-    # Navigate to category page
-    category_url = f'https://play.google.com/store/apps/category/{category_id}'
-    driver.get(category_url)
-    time.sleep(3)
+    category_url = build_category_url(category_id)
+    page_source, soup = fetch_page(session, category_url, page_cache)
     
-    # Scroll to load more apps
-    print("Scrolling to load apps...")
-    scroll_count = 0
-    max_scrolls = 20  # Limit scrolls to prevent infinite loop
+    app_links = []
+    seen_ids = set()
+
+    all_links = [link.get('href') for link in soup.find_all('a', href=True)]
+    all_links.extend(re.findall(r'(/store/apps/details\?id=[^"\'&]+)', page_source))
     
-    while scroll_count < max_scrolls:
-        last_height = driver.execute_script("return document.body.scrollHeight")
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(2)
-        new_height = driver.execute_script("return document.body.scrollHeight")
-        
-        if new_height == last_height:
-            break
-        scroll_count += 1
-    
-    # Get page source and parse
-    page_source = driver.page_source
-    soup = BeautifulSoup(page_source, 'html.parser')
-    
-    # Find all app links
-    app_links = set()
-    all_links = soup.find_all('a', href=True)
-    
-    for link in all_links:
-        href = link['href']
+    for href in all_links:
+        if not href:
+            continue
         if '/store/apps/details?id=' in href:
-            full_url = 'https://play.google.com' + href if href.startswith('/') else href
-            # Clean URL (remove extra parameters)
-            if '&' in full_url:
-                full_url = full_url.split('&')[0]
-            app_links.add(full_url)
+            full_url = urljoin('https://play.google.com', href)
+            normalized_url = normalize_app_url(full_url)
+            if not normalized_url:
+                continue
+
+            app_id = extract_app_id_from_url(normalized_url)
+            if not app_id or app_id in seen_ids:
+                continue
+
+            seen_ids.add(app_id)
+            app_links.append(normalized_url)
             
             if len(app_links) >= max_apps:
                 break
@@ -329,70 +417,36 @@ def scrape_category(category_name, category_id, max_apps=100, csv_filename='goog
     print(f"Found {len(app_links)} app links in {category_name}")
     
     # Extract details for each app and save immediately
-    for idx, app_url in enumerate(list(app_links)[:max_apps], 1):
+    for idx, app_url in enumerate(app_links[:max_apps], 1):
         print(f"Processing app {idx}/{min(len(app_links), max_apps)}: {app_url}")
         
-        app_data = extract_app_details(app_url, category_name)
+        app_data = extract_app_details(session, app_url, category_name, page_cache)
         
         if app_data:
-            # Save each app immediately
-            save_to_csv([app_data], csv_filename, append=(not is_first_category or idx > 1))
+            existing_apps[app_data['app_link']] = app_data
             apps_saved_count += 1
             print(f"  ✓ {app_data['app_name']} - {app_data['install_count']} installs - {app_data['release_date']}")
         
         # Small delay to avoid rate limiting
-        time.sleep(1)
+        time.sleep(CONFIG['DELAY_BETWEEN_REQUESTS'])
     
     return apps_saved_count
 
-def save_to_csv(apps_data, filename='google_play_apps.csv', append=False):
-    """Save collected data to CSV file"""
-    if not apps_data:
-        print("No data to save!")
-        return
+def save_to_csv(apps_data, filename='google_play_apps.csv'):
+    """Write one deduplicated CSV file from the merged app map."""
     
     csv_path = os.path.join(os.path.dirname(__file__), filename)
-    
-    # Define CSV headers
-    headers = [
-        'Niche',
-        'App Name',
-        'Logo URL',
-        'Install Count',
-        'Release Date',
-        'Rating',
-        'Review Count',
-        'App Link',
-        'Developer',
-        'Description',
-        'Keywords',
-        'Screenshot 1',
-        'Screenshot 2',
-        'Screenshot 3',
-        'Screenshot 4'
-    ]
+    apps_list = sorted(apps_data.values(), key=lambda app: app.get('app_name', '').lower())
     
     try:
-        # Check if file exists to determine if we need to write headers
-        file_exists = os.path.exists(csv_path)
-        mode = 'a' if append and file_exists else 'w'
+        with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=CSV_HEADERS)
+            writer.writeheader()
+
+            for app in apps_list:
+                writer.writerow(app_to_csv_row(app))
         
-        with open(csv_path, mode, newline='', encoding='utf-8-sig') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=[
-                'niche', 'app_name', 'logo_url', 'install_count', 
-                'release_date', 'rating', 'review_count', 'app_link', 'developer',
-                'description', 'keywords', 'screenshot_1', 'screenshot_2', 'screenshot_3', 'screenshot_4'
-            ])
-            
-            # Write header only if file is new or we're overwriting
-            if not file_exists or not append:
-                csvfile.write(','.join(headers) + '\n')
-            
-            # Write data
-            for app in apps_data:
-                writer.writerow(app)
-        
-        print(f"  ✓ Saved {len(apps_data)} apps to: {csv_path}")
+        print(f"  ✓ Saved {len(apps_list)} deduplicated apps to: {csv_path}")
         
     except Exception as e:
         print(f"  ✗ Error saving to CSV: {e}")
@@ -406,19 +460,18 @@ def main():
     
     total_apps_scraped = 0
     csv_filename = 'google_play_apps.csv'
-    
-    # Remove existing CSV file to start fresh
+
     csv_path = os.path.join(os.path.dirname(__file__), csv_filename)
-    if os.path.exists(csv_path):
-        os.remove(csv_path)
-        print(f"Removed existing file: {csv_filename}\n")
+    existing_apps = load_existing_csv(csv_filename)
+
+    session = create_session()
+    page_cache = {}
     
     try:
         # Scrape each category
         for idx, (category_name, category_id) in enumerate(CATEGORIES.items(), 1):
             try:
-                apps_count = scrape_category(category_name, category_id, max_apps=100, 
-                                            csv_filename=csv_filename, is_first_category=(idx == 1))
+                apps_count = scrape_category(session, page_cache, existing_apps, category_name, category_id, max_apps=100)
                 
                 total_apps_scraped += apps_count
                 if apps_count > 0:
@@ -430,11 +483,14 @@ def main():
             except Exception as e:
                 print(f"✗ Error scraping {category_name}: {e}\n")
                 continue
+
+        save_to_csv(existing_apps, csv_filename)
         
         # Final summary
         print(f"\n{'='*60}")
         print(f"✓ SCRAPING COMPLETE!")
         print(f"✓ Total apps scraped: {total_apps_scraped}")
+        print(f"✓ Total unique apps in file: {len(existing_apps)}")
         print(f"✓ Data saved to: {csv_path}")
         print(f"{'='*60}")
         
@@ -444,9 +500,8 @@ def main():
         print(f"Total apps saved: {total_apps_scraped}")
     
     finally:
-        # Close the browser
-        driver.quit()
-        print("\nBrowser closed.")
+        session.close()
+        print("\nHTTP session closed.")
         print(f"Finished at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 if __name__ == "__main__":
