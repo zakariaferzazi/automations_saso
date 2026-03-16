@@ -2,7 +2,7 @@ name: Scrape Similar Apps
 
 on:
   schedule:
-    - cron: '0 1 * * *'  # Runs 1 hour after categories (01:00 UTC)
+    - cron: '40 */4 * * *'  # Runs every 4 hours at :40 UTC
   workflow_dispatch: 
 
 permissions:
