@@ -197,6 +197,30 @@ def extract_keywords_from_description(description, num_keywords=5):
     top_keywords = [word for word, _ in word_freq.most_common(num_keywords)]
     
     return ', '.join(top_keywords) if top_keywords else "N/A"
+
+
+def _normalize_description_text(text):
+    if not text:
+        return 'N/A'
+
+    # Normalize whitespace while keeping paragraph breaks readable.
+    normalized = str(text).replace('\r\n', '\n').replace('\r', '\n')
+    lines = [re.sub(r'[ \t]+', ' ', line).strip() for line in normalized.split('\n')]
+
+    compact = []
+    prev_blank = False
+    for line in lines:
+        if line:
+            compact.append(line)
+            prev_blank = False
+        elif not prev_blank and compact:
+            compact.append('')
+            prev_blank = True
+
+    result = '\n'.join(compact).strip()
+    return result if result else 'N/A'
+
+
 def extract_release_date(page_source, app_url):
     """Extract release date using the existing pattern"""
     target_string = 'dappgame_ratings"]]],["'
@@ -317,16 +341,22 @@ def extract_app_details(session, app_url, category_name, page_cache):
         if rating == "N/A" or "Download" in review_count or "Install" in review_count:
             review_count = "N/A"
         
-        # Extract description
+        # Extract description (preserve HTML formatting)
         description = "N/A"
         description_tag = soup.find('div', {'data-expandable-section': True})
         if description_tag:
-            description = description_tag.text.strip()
+            for br in description_tag.find_all('br'):
+                br.replace_with('\n')
+            description = description_tag.get_text('\n').strip()
         else:
-            # Try alternative selectors
             desc_tags = soup.find_all('div', {'class': 'bARER'})
             if desc_tags:
-                description = ' '.join([tag.text.strip() for tag in desc_tags])
+                for tag in desc_tags:
+                    for br in tag.find_all('br'):
+                        br.replace_with('\n')
+                description = '\n'.join([tag.get_text('\n').strip() for tag in desc_tags])
+
+        description = _normalize_description_text(description)
         
         # Extract keywords from description
         keywords = extract_keywords_from_description(description)
