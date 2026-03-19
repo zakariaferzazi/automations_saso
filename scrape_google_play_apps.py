@@ -183,7 +183,7 @@ def extract_keywords_from_description(description, num_keywords=5):
         'will', 'would', 'could', 'should', 'may', 'might', 'must', 'can', 'this', 'that', 'these',
         'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'what', 'which', 'who', 'when', 'where',
         'why', 'how', 'all', 'each', 'every', 'both', 'few', 'more', 'most', 'other', 'some', 'such',
-        'no', 'nor', 'not', 'only', 'so', 'than', 'as', 'if', 'because', 'while', 'although'
+        'no', 'nor', 'not', 'only', 'so', 'than', 'as', 'if', 'because', 'while', 'although','your'
     }
     
     # Split and filter words
