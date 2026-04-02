@@ -103,6 +103,30 @@ def _parse_itunes_date(date_str: str):
     return None
 
 
+def _get_oldest_web_version_date(app_id):
+    """Scrape the App Store web page to find the oldest visible version date in the history snippet."""
+    url = f"https://apps.apple.com/us/app/id{app_id}"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    oldest_dt = None
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            for time_tag in soup.find_all('time'):
+                dt_str = time_tag.get('datetime', '')
+                if dt_str:
+                    dt_str = dt_str[:10]  # Just grab YYYY-MM-DD
+                    try:
+                        dt = datetime.strptime(dt_str, '%Y-%m-%d')
+                        if not oldest_dt or dt < oldest_dt:
+                            oldest_dt = dt
+                    except ValueError:
+                        continue
+    except Exception:
+        pass
+    return oldest_dt
+
+
 class AppStoreSearcher:
     def __init__(self, days_threshold=None):
         """
@@ -281,14 +305,20 @@ class AppStoreSearcher:
             app_info = app_data['results'][0]
             
             # Parse release date.
-            # releaseDate = original first-publish date on the App Store.
-            release_date_str = app_info.get('releaseDate', '')
-            if not release_date_str:
-                return None
+            # 1. Start with the iTunes API releaseDate
+            api_date_str = app_info.get('releaseDate', '')
+            api_date = _parse_itunes_date(api_date_str) if api_date_str else None
 
-            release_date = _parse_itunes_date(release_date_str)
+            # 2. Scrape the public webpage for the oldest visible update "Version History" date
+            web_date = _get_oldest_web_version_date(app_id)
+
+            # 3. Use whichever date is further in the past
+            release_date = api_date
+            if web_date and (not api_date or web_date < api_date):
+                release_date = web_date
+
             if release_date is None:
-                print(f"  Skipped (unparseable date: {release_date_str!r})")
+                print(f"  Skipped (unparseable date from both API and Web)")
                 return None
 
             # Check if app was released within the threshold (OPTIONAL)

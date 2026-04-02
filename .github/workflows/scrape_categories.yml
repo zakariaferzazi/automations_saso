@@ -2,7 +2,7 @@ name: Scrape Google Play Categories
 
 on:
   schedule:
-    - cron: '20 */4 * * *'  # Runs every 4 hours at :20 UTC
+    - cron: '20 */2 * * *'  # Runs every 2 hours at :20 UTC
   workflow_dispatch: 
 
 permissions:
