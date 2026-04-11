@@ -24,7 +24,23 @@ CONFIG = {
 # App Store Categories (iTunes genre IDs — names match Play Store niches exactly)
 CATEGORIES = {
     "Games":               6014,
-
+    "Business":            6000,
+    "Education":           6017,
+    "Entertainment":       6016,
+    "Finance":             6015,
+    "Food & Drink":        6023,
+    "Health & Fitness":    6013,
+    "Lifestyle":           6010,
+    "Medical":             6020,
+    "Music":               6011,
+    "News":                6009,
+    "Photo & Video":       6008,
+    "Productivity":        6007,
+    "Shopping":            6024,
+    "Social Networking":   6005,
+    "Sports":              6004,
+    "Travel":              6003,
+    "Utilities":           6002,
 }
 
 # Countries to search (using correct iTunes store country codes)
