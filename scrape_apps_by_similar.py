@@ -19,44 +19,7 @@ from collections import deque, Counter
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
 app_links = [
-"https://play.google.com/store/apps/details?id=com.artmvstd.pregnancyChecker",
-"https://play.google.com/store/apps/details?id=com.artmvstd.physicsSolver",
-"https://play.google.com/store/apps/details?id=com.artmvstd.chemistrySolver",
-"https://play.google.com/store/apps/details?id=com.artmvstd.geometrySolver",
-"https://play.google.com/store/apps/details?id=com.artmvstd.mathSolver",
-"https://play.google.com/store/apps/details?id=com.artmvstd.daysTracker",
-"https://play.google.com/store/apps/details?id=com.artmvstd.jewelryIdentifier",
-"https://play.google.com/store/apps/details?id=com.artmvstd.babyGender",
-"https://play.google.com/store/apps/details?id=com.artmvstd.biologySolver",
-"https://play.google.com/store/apps/details?id=com.artmvstd.stampIdentifier",
-"https://play.google.com/store/apps/details?id=com.artmvstd.halalScanner",
-"https://play.google.com/store/apps/details?id=com.artmvstd.sportsCard",
-"https://play.google.com/store/apps/details?id=com.artmvstd.profitAi",
-"https://play.google.com/store/apps/details?id=com.artmvstd.roastBot",
-"https://play.google.com/store/apps/details?id=com.artmvstd.cardScanner",
-"https://play.google.com/store/apps/details?id=com.artmvstd.repairHelper",
-"https://play.google.com/store/apps/details?id=com.artmvstd.waterEject",
-"https://play.google.com/store/apps/details?id=com.artmvstd.historySolver",
-"https://play.google.com/store/apps/details?id=com.artmvstd.antiqueIdentifier",
-"https://play.google.com/store/apps/details?id=com.artmvstd.snakeIdentifier",
-"https://play.google.com/store/apps/details?id=com.artmvstd.statisticsSolver",
-"https://play.google.com/store/apps/details?id=com.artmvstd.coinIdentifier",
-"https://play.google.com/store/apps/details?id=com.artmvstd.convertPdf",
-"https://play.google.com/store/apps/details?id=com.artmvstd.rockIdentifier",
-"https://play.google.com/store/apps/details?id=com.artmvstd.flashcardsMaker",
-"https://play.google.com/store/apps/details?id=com.artmvstd.signDocuments",
-"https://play.google.com/store/apps/details?id=com.artmvstd.voiceTranscriber",
-"https://play.google.com/store/apps/details?id=com.artmvstd.interiorDesign",
-"https://play.google.com/store/apps/details?id=com.artmvstd.headacheTracker",
-"https://play.google.com/store/apps/details?id=com.artmvstd.photoCartoon",
-"https://play.google.com/store/apps/details?id=com.artmvstd.fishIdentifier",
-"https://play.google.com/store/apps/details?id=com.artmvstd.waterTracker",
-"https://play.google.com/store/apps/details?id=com.artmvstd.insectIdentifier",
-"https://play.google.com/store/apps/details?id=com.artmvstd.plantIdentifier",
-"https://play.google.com/store/apps/details?id=com.artmvstd.animalIdentifier",
-"https://play.google.com/store/apps/details?id=com.artmvstd.woodIdentifier",
-"https://play.google.com/store/apps/details?id=com.artmvstd.fastingTracker",
-"https://play.google.com/store/apps/details?id=com.syngmaster.currencyConverter"
+"https://play.google.com/store/apps/details?id=com.creadv.mp3audiotagger"
 ]
 # ===========================
 # CONFIGURATION - EDIT HERE
