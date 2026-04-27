@@ -3,6 +3,7 @@ import csv
 import os
 import re
 import time
+import random
 from collections import Counter
 from datetime import datetime
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
@@ -27,10 +28,13 @@ CONFIG = {
 
     # Delay between detail requests
     'DELAY_BETWEEN_REQUESTS': 1,
+
+    # How many randomly chosen translated keywords to search per niche in a single run
+    'KEYWORDS_PER_CATEGORY_PER_RUN': 2,
 }
 
 PLAY_STORE_BASE_URL = 'https://play.google.com/store/apps/details'
-CATEGORY_BASE_URL = 'https://play.google.com/store/apps/category'
+SEARCH_BASE_URL = 'https://play.google.com/store/search'
 REQUEST_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     'Accept-Language': 'en-US,en;q=0.9',
@@ -58,26 +62,28 @@ INTERNAL_FIELDS = [
     'app_link', 'developer', 'description', 'keywords', 'screenshot_1', 'screenshot_2', 'screenshot_3', 'screenshot_4'
 ]
 
-# Google Play Store Categories  (names match App Store niches exactly)
-CATEGORIES = {
-    "Games":               "GAME",
-    "Business":            "BUSINESS",
-    "Education":           "EDUCATION",
-    "Entertainment":       "ENTERTAINMENT",
-    "Finance":             "FINANCE",
-    "Food & Drink":        "FOOD_AND_DRINK",
-    "Health & Fitness":    "HEALTH_AND_FITNESS",
-    "Lifestyle":           "LIFESTYLE",
-    "Medical":             "MEDICAL",
-    "Music":               "MUSIC_AND_AUDIO",
-    "News":                "NEWS_AND_MAGAZINES",
-    "Photo & Video":       "PHOTOGRAPHY",
-    "Productivity":        "PRODUCTIVITY",
-    "Shopping":            "SHOPPING",
-    "Social Networking":   "SOCIAL",
-    "Sports":              "SPORTS",
-    "Travel":              "TRAVEL_AND_LOCAL",
-    "Utilities":           "TOOLS",
+# Google Play Store Categories mapped to foreign language keywords
+# By searching the US store using these phrases, we uncover foreign-first or poorly localized apps
+# invisible to English searches, providing highly untraditional results.
+CATEGORY_TRANSLATIONS = {
+    "Games":             ["Games", "Jeux", "Juegos", "Spiele", "Игры", "ألعاب", "Jogos", "Gry", "Oyunlar", "ゲーム", "游戏", "게임", "Игри", "Igry", "Rochi", "Mga lojëra", "Jocuri", "Oyunlar", "Mga Dula"],
+    "Business":          ["Business", "Affaires", "Negocios", "Wirtschaft", "Бизнес", "أعمال", "Negócios", "Biznes", "İş", "ビジネス", "商业", "비즈니스", "Poslovanje", "Geschäft", "Komerc", "Maanalo"],
+    "Education":         ["Education", "Éducation", "Educación", "Bildung", "Образование", "تعليم", "Educação", "Edukacja", "Eğitim", "教育", "教育", "교육", "Osvěta", "Izobraževanje", "Öğretim", "Pendidikan"],
+    "Entertainment":     ["Entertainment", "Divertissement", "Entretenimiento", "Unterhaltung", "Развлечения", "ترفيه", "Entretenimento", "Rozrywka", "Eğlence", "エンターテイメント", "娱乐", "엔터테인먼트"],
+    "Finance":           ["Finance", "Finances", "Finanzas", "Finanzen", "Финансы", "تمويل", "Finanças", "Finanse", "Finans", "ファイナンス", "金融", "금융", "Finansai", "Zabaven", "Pera"],
+    "Food & Drink":      ["Food & Drink", "Nourriture et Boissons", "Comida y Bebida", "Essen & Trinken", "Еда и напитки", "طعام وشراب", "Comida e Bebida", "Jedzenie i Picie", "Yeme & İçme", "食べ物＆飲み物", "饮食", "음식 및 음료"],
+    "Health & Fitness":  ["Health & Fitness", "Santé et Forme", "Salud y Bienestar", "Gesundheit & Fitness", "Здоровье и фитнес", "الصحة واللياقة", "Saúde e Boa Forma", "Zdrowie i Fitness", "Sağlık & Fitness", "健康とフィットネス", "健康与健身", "건강 및 피트니스"],
+    "Lifestyle":         ["Lifestyle", "Mode de vie", "Estilo de vida", "Lebensstil", "Стиль жизни", "نمط الحياة", "Styl życia", "Yaşam Tarzı", "ライフスタイル", "生活方式", "라이프스타일", "Chế độ sinh hoạt", "Gaya hidup"],
+    "Medical":           ["Medical", "Médical", "Médico", "Medizinisch", "Медицинские", "طبي", "Medycyna", "Tıbbi", "医療", "医疗", "의료", "Khama", "Ljekarnik", "Apoteka", "Médecine"],
+    "Music":             ["Music", "Musique", "Música", "Musik", "Музыка", "موسيقى", "Muzyka", "Müzik", "音楽", "音乐", "음악", "Glazba", "Muzika", "Nyimbo", "Awit"],
+    "News":              ["News", "Actualités", "Noticias", "Nachrichten", "Новости", "أخبار", "Notícias", "Wiadomości", "Haberler", "ニュース", "新闻", "뉴스", "Noviny", "Vijesti", "Berita"],
+    "Photo & Video":     ["Photo & Video", "Photo et Vidéo", "Foto y Video", "Foto & Video", "Фото и видео", "صور وفيديو", "Foto e Vídeo", "Zdjęcia i Wideo", "Fotoğraf & Video", "写真とビデオ", "摄影与录像", "사진 및 비디오"],
+    "Productivity":      ["Productivity", "Productivité", "Productividad", "Produktivität", "Продуктивность", "إنتاجية", "Produtividade", "Produktywność", "Üretkenlik", "生産性", "效率", "생산성"],
+    "Shopping":          ["Shopping", "Achats", "Compras", "Einkaufen", "Покупки", "تسوق", "Zakupy", "Alışveriş", "ショッピング", "购物", "쇼핑", "Hla", "Pabili", "Sipèmarkèt"],
+    "Social Networking": ["Social Networking", "Réseaux sociaux", "Redes sociales", "Soziale Netzwerke", "Социальные сети", "شبكات اجتماعية", "Redes Sociais", "Sieci Społecznościowe", "Sosyal Ağ", "ソーシャルネットワーキング", "社交网络", "소셜 네트워킹"],
+    "Sports":            ["Sports", "Sports", "Deportes", "Sport", "Спорт", "رياضة", "Esportes", "Sport", "Spor", "スポーツ", "体育", "스포츠", "Olahraga", "Mga sport"],
+    "Travel":            ["Travel", "Voyages", "Viajes", "Reisen", "Путешествия", "سفر", "Viagens", "Podróże", "Seyahat", "旅行", "旅游", "여행", "Viajes", "Paglalakbay"],
+    "Utilities":         ["Utilities", "Utilitaires", "Utilidades", "Dienstprogramme", "Инструменты", "أدوات", "Utilitários", "Narzędzia", "Araçlar", "ユーティリティ", "工具", "도구"],
 }
 
 
@@ -110,9 +116,9 @@ def normalize_app_url(url):
     return build_app_url(app_id) if app_id else None
 
 
-def build_category_url(category_id):
-    """Build a category URL with fixed locale."""
-    return f"{CATEGORY_BASE_URL}/{category_id}?{urlencode({'hl': CONFIG['LANGUAGE'], 'gl': CONFIG['COUNTRY']})}"
+def build_search_url(keyword):
+    """Build a search URL with fixed locale."""
+    return f"{SEARCH_BASE_URL}?{urlencode({'q': keyword, 'c': 'apps', 'hl': CONFIG['LANGUAGE'], 'gl': CONFIG['COUNTRY']})}"
 
 
 def fetch_page(session, url, page_cache):
@@ -408,16 +414,16 @@ def extract_app_details(session, app_url, category_name, page_cache):
         print(f"Error extracting details for {app_url}: {e}")
         return None
 
-def scrape_category(session, page_cache, existing_apps, category_name, category_id, max_apps=100):
-    """Scrape apps from a specific category."""
+def scrape_search_keyword(session, page_cache, existing_apps, category_name, keyword, max_apps=100):
+    """Scrape apps from a specific search keyword, assigning them to the English category."""
     print(f"\n{'='*60}")
-    print(f"Scraping category: {category_name}")
+    print(f"Scraping category '{category_name}' using translated keyword: '{keyword}'")
     print(f"{'='*60}")
     
     apps_saved_count = 0
     
-    category_url = build_category_url(category_id)
-    page_source, soup = fetch_page(session, category_url, page_cache)
+    search_url = build_search_url(keyword)
+    page_source, soup = fetch_page(session, search_url, page_cache)
     
     app_links = []
     seen_ids = set()
@@ -444,7 +450,7 @@ def scrape_category(session, page_cache, existing_apps, category_name, category_
             if len(app_links) >= max_apps:
                 break
     
-    print(f"Found {len(app_links)} app links in {category_name}")
+    print(f"Found {len(app_links)} app links for keyword '{keyword}'")
     
     # Extract details for each app and save immediately
     for idx, app_url in enumerate(app_links[:max_apps], 1):
@@ -498,21 +504,25 @@ def main():
     page_cache = {}
     
     try:
-        # Scrape each category
-        for idx, (category_name, category_id) in enumerate(CATEGORIES.items(), 1):
-            try:
-                apps_count = scrape_category(session, page_cache, existing_apps, category_name, category_id, max_apps=100)
-                
-                total_apps_scraped += apps_count
-                if apps_count > 0:
-                    print(f"✓ Collected {apps_count} apps from {category_name}")
-                    print(f"  📊 Total apps saved so far: {total_apps_scraped}\n")
-                else:
-                    print(f"✗ No apps collected from {category_name}\n")
+        # Loop through each category and pick a few random localized keywords to scrape
+        for category_name, translations in CATEGORY_TRANSLATIONS.items():
+            num_to_pick = min(CONFIG['KEYWORDS_PER_CATEGORY_PER_RUN'], len(translations))
+            selected_keywords = random.sample(translations, num_to_pick)
+            
+            for keyword in selected_keywords:
+                try:
+                    apps_count = scrape_search_keyword(session, page_cache, existing_apps, category_name, keyword, max_apps=100)
                     
-            except Exception as e:
-                print(f"✗ Error scraping {category_name}: {e}\n")
-                continue
+                    total_apps_scraped += apps_count
+                    if apps_count > 0:
+                        print(f"✓ Collected {apps_count} apps for keyword '{keyword}' in '{category_name}'")
+                        print(f"  📊 Total apps saved so far: {total_apps_scraped}\n")
+                    else:
+                        print(f"✗ No apps collected for '{keyword}'\n")
+                        
+                except Exception as e:
+                    print(f"✗ Error scraping keyword '{keyword}': {e}\n")
+                    continue
 
         save_to_csv(existing_apps, csv_filename)
         
