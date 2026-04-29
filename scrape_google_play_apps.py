@@ -26,6 +26,9 @@ CONFIG = {
     'LANGUAGE': 'en_US',
     'COUNTRY': 'US',
 
+    # Minimum install count required to save the app
+    'MINIMUM_INSTALLS': 5000,
+
     # Delay between detail requests
     'DELAY_BETWEEN_REQUESTS': 1,
 
@@ -389,6 +392,35 @@ def extract_app_details(session, app_url, category_name, page_cache):
                 print(f"  [Date Filter] Skipping app (release date: {release_date})")
                 return None
         
+        # --- Filter by minimum installs ---
+        def parse_install_count(installs_str):
+            if not installs_str or installs_str == "N/A":
+                return 0
+            
+            clean_str = str(installs_str).replace('+', '').replace(',', '').upper().strip()
+            if not clean_str:
+                return 0
+                
+            multiplier = 1
+            if 'B' in clean_str:
+                multiplier = 1_000_000_000
+                clean_str = clean_str.replace('B', '')
+            elif 'M' in clean_str:
+                multiplier = 1_000_000
+                clean_str = clean_str.replace('M', '')
+            elif 'K' in clean_str:
+                multiplier = 1_000
+                clean_str = clean_str.replace('K', '')
+                
+            try:
+                return int(float(clean_str) * multiplier)
+            except ValueError:
+                return 0
+
+        if parse_install_count(install_count) < CONFIG.get('MINIMUM_INSTALLS', 5000):
+            print(f"  [Install Filter] Skipping app (installs: {install_count})")
+            return None
+
         # Debug print
         print(f"  App: {app_name}, Installs: {install_count}, Date: {release_date}")
         
