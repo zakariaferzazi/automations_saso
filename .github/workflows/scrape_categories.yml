@@ -35,9 +35,12 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add google_play_apps.csv
+          # Ensure smooth merging for CSVs
+          git config pull.rebase true
+          echo "*.csv merge=union" > .gitattributes
+          git add .gitattributes google_play_apps.csv
           git diff --staged --quiet || git commit -m "chore: update google_play_apps.csv [$(date -u '+%Y-%m-%d %H:%M UTC')]"
-          git pull --rebase origin ${{ github.ref_name }}
+          git pull origin ${{ github.ref_name }}
           git push origin ${{ github.ref_name }}
 
       - name: Upload to WordPress via FTP
