@@ -1,0 +1,58 @@
+name: Scrape Google Play By Keyword
+
+on:
+  schedule:
+    - cron: '0 1-23/2 * * *'  # Runs every 2 hours on odd hours (01:00, 03:00, 05:00... UTC)
+  workflow_dispatch: 
+
+permissions:
+  contents: write
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install requests beautifulsoup4
+
+      - name: Fetch existing CSV from remote
+        run: git fetch origin ${{ github.ref_name }} && git checkout origin/${{ github.ref_name }} -- google_play_keyword_apps.csv || true
+
+      - name: Run Google Play Keyword Scraper
+        run: python scrape_google_play_by_keyword.py
+
+      - name: Commit updated CSV to repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Ensure smooth merging for CSVs
+          git config pull.rebase true
+          echo "*.csv merge=union" > .gitattributes
+          git add .gitattributes google_play_keyword_apps.csv
+          git diff --staged --quiet || git commit -m "chore: update google_play_keyword_apps.csv [$(date -u '+%Y-%m-%d %H:%M UTC')]"
+          git pull origin ${{ github.ref_name }}
+          git push origin ${{ github.ref_name }}
+
+      - name: Upload to WordPress via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USER }}
+          password: ${{ secrets.FTP_PASS }}
+          port: 21
+          local-dir: ./
+          server-dir: /public_html/wp-content/themes/astra-child/
+          exclude: |
+            **/*
+            !google_play_keyword_apps.csv
