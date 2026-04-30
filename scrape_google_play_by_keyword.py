@@ -3,7 +3,6 @@ import csv
 import os
 import re
 import time
-import random
 from collections import Counter
 from datetime import datetime
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
@@ -144,7 +143,7 @@ REQUEST_HEADERS = {
 }
 REQUEST_TIMEOUT = 20
 CSV_HEADERS = [
-    'Search Keyword',
+    'Niche',
     'App Name',
     'Logo URL',
     'Install Count',
@@ -161,7 +160,7 @@ CSV_HEADERS = [
     'Screenshot 4'
 ]
 INTERNAL_FIELDS = [
-    'search_keyword', 'app_name', 'logo_url', 'install_count', 'release_date', 'rating', 'review_count',
+    'niche', 'app_name', 'logo_url', 'install_count', 'release_date', 'rating', 'review_count',
     'app_link', 'developer', 'description', 'keywords', 'screenshot_1', 'screenshot_2', 'screenshot_3', 'screenshot_4'
 ]
 
@@ -220,7 +219,7 @@ def app_to_csv_row(app):
     }
 
 
-def load_existing_csv(filename='google_play_keyword_apps.csv'):
+def load_existing_csv(filename='google_play_apps.csv'):
     csv_path = os.path.join(os.path.dirname(__file__), filename)
     existing_apps = {}
 
@@ -463,7 +462,7 @@ def extract_app_details(session, app_url, target_keyword, page_cache):
         print(f"  App: {app_name}, Installs: {install_count}, Date: {release_date}")
         
         return {
-            'niche': "Tools",
+            'niche': target_keyword,
             'app_name': app_name,
             'logo_url': logo_url,
             'install_count': install_count,
@@ -533,7 +532,7 @@ def process_search_keyword(session, page_cache, existing_apps, keyword, max_apps
     
     return apps_saved_count
 
-def save_to_csv(apps_data, filename='google_play_keyword_apps.csv'):
+def save_to_csv(apps_data, filename='google_play_apps.csv'):
     csv_path = os.path.join(os.path.dirname(__file__), filename)
     apps_list = sorted(apps_data.values(), key=lambda app: app.get('app_name', '').lower())
     
@@ -557,7 +556,7 @@ def main():
     print("="*60)
     
     total_apps_scraped = 0
-    csv_filename = 'google_play_keyword_apps.csv'
+    csv_filename = 'google_play_apps.csv'
     csv_path = os.path.join(os.path.dirname(__file__), csv_filename)
     
     existing_apps = load_existing_csv(csv_filename)

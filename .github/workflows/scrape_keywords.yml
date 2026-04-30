@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: google-play-apps-csv
+  cancel-in-progress: false
+
 jobs:
   scrape:
     runs-on: ubuntu-latest
@@ -27,7 +31,7 @@ jobs:
           pip install requests beautifulsoup4
 
       - name: Fetch existing CSV from remote
-        run: git fetch origin ${{ github.ref_name }} && git checkout origin/${{ github.ref_name }} -- google_play_keyword_apps.csv || true
+        run: git fetch origin ${{ github.ref_name }} && git checkout origin/${{ github.ref_name }} -- google_play_apps.csv || true
 
       - name: Run Google Play Keyword Scraper
         run: python scrape_google_play_by_keyword.py
@@ -39,8 +43,8 @@ jobs:
           # Ensure smooth merging for CSVs
           git config pull.rebase true
           echo "*.csv merge=union" > .gitattributes
-          git add .gitattributes google_play_keyword_apps.csv
-          git diff --staged --quiet || git commit -m "chore: update google_play_keyword_apps.csv [$(date -u '+%Y-%m-%d %H:%M UTC')]"
+          git add .gitattributes google_play_apps.csv
+          git diff --staged --quiet || git commit -m "chore: update google_play_apps.csv [$(date -u '+%Y-%m-%d %H:%M UTC')]"
           git pull origin ${{ github.ref_name }}
           git push origin ${{ github.ref_name }}
 
@@ -55,4 +59,4 @@ jobs:
           server-dir: /public_html/wp-content/themes/astra-child/
           exclude: |
             **/*
-            !google_play_keyword_apps.csv
+            !google_play_apps.csv
