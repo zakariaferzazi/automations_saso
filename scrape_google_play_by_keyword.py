@@ -462,7 +462,7 @@ def extract_app_details(session, app_url, target_keyword, page_cache):
         print(f"  App: {app_name}, Installs: {install_count}, Date: {release_date}")
         
         return {
-            'niche': target_keyword,
+            'niche': "Tools",
             'app_name': app_name,
             'logo_url': logo_url,
             'install_count': install_count,
